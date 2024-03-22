@@ -1,0 +1,215 @@
+#include <Wire.h>
+#include <ESP8266WiFi.h>
+#include <PubSubClient.h>
+
+// WiFi
+const char *ssid = "oook7";
+const char *password = "manijak123";
+
+// MQTT Broker
+const char *mqtt_broker = "broker.emqx.io";
+const char *topic = "esp8266/test";
+const char *mqtt_username = "emqx";
+const char *mqtt_password = "public";
+const int mqtt_port = 1883;
+
+// I2C Address for MPU6050
+const int MPU = 0x68;
+
+// Variables for raw values from MPU ADC
+int AcX, AcY, AcZ, GyX, GyY, GyZ;
+int minVal = 0;
+int maxVal = 65536;
+int offsetTemp = 35;
+int offsetTempLevels = 521;
+
+// BUZZER
+#define NOTE_E6  500
+#define REST     0
+int tempo = 80;
+int buzzer = 14;
+int melody[] = {NOTE_E6, 8, NOTE_E6, 8, NOTE_E6, 8, REST, 8, NOTE_E6, 4, NOTE_E6, 4, NOTE_E6, 4, REST, 8, NOTE_E6, 8, NOTE_E6, 8, NOTE_E6, 8, REST, 4, REST, 4, REST, 4};
+int notes = sizeof(melody) / sizeof(melody[0]) / 2;
+int wholenote = (60000 * 4) / tempo;
+int divider = 0, noteDuration = 1;
+
+// Function prototypes
+void callback(char *topic, byte *payload, unsigned int length);
+
+WiFiClient espClient;
+PubSubClient client(espClient);
+
+void setup() {
+  Serial.begin(115200);
+  Wire.begin();
+  WiFi.begin(ssid, password);
+
+pinMode(15,OUTPUT);
+pinMode(13,OUTPUT);
+
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.println("Connecting to WiFi..");
+  }
+
+  Serial.println("Connected to the WiFi network");
+
+  client.setServer(mqtt_broker, mqtt_port);
+  client.setCallback(callback);
+
+  while (!client.connected()) {
+    String clientId = "esp8266-client-";
+    clientId += String(WiFi.macAddress());
+
+    if (client.connect(clientId.c_str(), mqtt_username, mqtt_password)) {
+      Serial.println("Connected to MQTT broker");
+    } else {
+      Serial.print("Failed with state ");
+      Serial.print(client.state());
+      delay(2000);
+    }
+  }
+
+  client.publish(topic, "hello emqx");
+  client.subscribe(topic);
+  Wire.beginTransmission(MPU);
+  Wire.write(0x6B);
+  Wire.write(0);
+  Wire.endTransmission(true);
+}
+
+void callback(char *topic, byte *payload, unsigned int length) {
+  Serial.print("Message arrived in topic: ");
+  Serial.println(topic);
+  Serial.print("Message:");
+
+  for (int i = 0; i < length; i++) {
+    Serial.print((char) payload[i]);
+  }
+
+  Serial.println();
+  Serial.println("-----------------------");
+}
+int Tmp;
+int milis=0;
+
+void loop() {
+  
+  
+  
+  
+  Wire.beginTransmission(MPU);
+  Wire.write(0x3B);
+  Wire.endTransmission(false);
+
+  Wire.requestFrom(MPU, 16, true);
+
+int novi=0;
+int stari=novi;
+  
+int mili=millis()-milis;
+if(abs(mili)>2000 ){ 
+  milis=millis();
+  GyX = Wire.read() << 8 | Wire.read();
+  GyY = Wire.read() << 8 | Wire.read();
+  GyZ = Wire.read() << 8 | Wire.read();
+  Tmp = Wire.read() << 8 | Wire.read();
+  AcX = Wire.read() << 8 | Wire.read();
+  AcY = Wire.read() << 8 | Wire.read();
+  AcZ = Wire.read() << 8 | Wire.read();
+
+  AcX = map(AcX, minVal, maxVal, 0, 2000);
+  AcY = map(AcY, minVal, maxVal, 0, 2000);
+  AcZ = map(AcZ, minVal, maxVal, 0, 2000);
+
+  int xAng = map(GyX, minVal, maxVal, 0, 360);
+  int yAng = map(GyY, minVal, maxVal, 0, 360);
+  int zAng = map(GyZ, minVal, maxVal, 0, 360);
+
+  Serial.print("AcX = "); Serial.print(AcX);
+  Serial.print(" | AcY = "); Serial.print(AcY);
+  Serial.print(" | AcZ = "); Serial.print(AcZ);
+  Serial.print(" | GyX = "); Serial.print(xAng);
+  Serial.print(" | GyY = "); Serial.print(yAng);
+  Serial.print(" | GyZ = "); Serial.println(zAng);
+  novi=zAng;
+}
+
+
+  client.loop();
+  int dug = digitalRead(12);
+
+  if (dug == LOW) {
+    digitalWrite(15, LOW);
+    digitalWrite(13, HIGH);
+  client.publish(topic, "Dugme je pritisnuto!"); 
+  for (int thisNote = 0; thisNote < notes * 2; thisNote = thisNote + 2) {
+    divider = melody[thisNote + 1];
+    if (divider > 0) {
+      noteDuration = (wholenote) / divider;
+    } else if (divider < 0) {
+      noteDuration = (wholenote) / abs(divider);
+      noteDuration *= 1;
+    }
+
+    tone(buzzer, melody[thisNote], noteDuration * 0.75);
+    delay(noteDuration);
+    noTone(buzzer);
+  }
+   for (int thisNote = 0; thisNote < notes * 2; thisNote = thisNote + 2) {
+    divider = melody[thisNote + 1];
+    if (divider > 0) {
+      noteDuration = (wholenote) / divider;
+    } else if (divider < 0) {
+      noteDuration = (wholenote) / abs(divider);
+      noteDuration *= 1;
+    }
+
+    tone(buzzer, melody[thisNote], noteDuration * 0.75);
+    delay(noteDuration);
+    noTone(buzzer);
+    
+  }digitalWrite(13,LOW);}
+  
+   else {
+    digitalWrite(15, HIGH);
+  }
+
+  
+  if (novi>stari+60) {
+    digitalWrite(13, LOW);
+    digitalWrite(15, HIGH);
+    Serial.print("Doslo je do pada!");
+  client.publish(topic, "Doslo je do pada!");
+  for (int thisNote = 0; thisNote < notes * 2; thisNote = thisNote + 2) {
+    divider = melody[thisNote + 1];
+    if (divider > 0) {
+      noteDuration = (wholenote) / divider;
+    } else if (divider < 0) {
+      noteDuration = (wholenote) / abs(divider);
+      noteDuration *= 1;
+    }
+
+    tone(buzzer, melody[thisNote], noteDuration * 0.75);
+    delay(noteDuration);
+    noTone(buzzer);
+  }
+   for (int thisNote = 0; thisNote < notes * 2; thisNote = thisNote + 2) {
+    divider = melody[thisNote + 1];
+    if (divider > 0) {
+      noteDuration = (wholenote) / divider;
+    } else if (divider < 0) {
+      noteDuration = (wholenote) / abs(divider);
+      noteDuration *= 1;
+    }
+
+    tone(buzzer, melody[thisNote], noteDuration * 0.75);
+    delay(noteDuration);
+    noTone(buzzer);
+    
+  }digitalWrite(13,LOW);
+  }
+   else {
+    digitalWrite(15, HIGH);
+  }
+}
